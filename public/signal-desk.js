@@ -4,32 +4,35 @@
 // language is untrusted input: anything but a known code means English. Keys
 // are looked up with Object.hasOwn so 'constructor' or '__proto__' fall back
 // to English instead of reaching Object.prototype. Values are plain text:
-// innerHTML templates wrap t() in esc(), static nodes swap with textContent.
+// innerHTML templates wrap sdT() in esc(), static nodes swap with textContent.
+// The helpers carry an sd prefix: this is a classic script sharing the page's
+// global scope, and Next's own scripts already declare short globals such as
+// t, so a top-level `const t` stops the whole file with a SyntaxError.
 const LANG_KEY='sd-lang';
 const LANGS=['en','it'];
 const I18N=(()=>{ try{ return JSON.parse(document.getElementById('sd-i18n')?.textContent||'{}')||{} }catch{ return {} } })();
 const safeLang=(v)=>LANGS.includes(v)?v:'en';
-let lang=safeLang((()=>{ try{ return localStorage.getItem(LANG_KEY) }catch{ return null } })());
-function msg(l, key){
+let uiLang=safeLang((()=>{ try{ return localStorage.getItem(LANG_KEY) }catch{ return null } })());
+function sdMsg(l, key){
   const cat=Object.hasOwn(I18N, l)?I18N[l]:null;
   return cat && Object.hasOwn(cat, key) && typeof cat[key]==='string' ? cat[key] : null;
 }
 /** Translate key into language l, filling {name} placeholders from vars. */
-function tr(l, key, vars){
-  const s=msg(l, key) ?? msg('en', key) ?? key;
+function sdTr(l, key, vars){
+  const s=sdMsg(l, key) ?? sdMsg('en', key) ?? key;
   return vars ? s.replace(/\{(\w+)\}/g, (m, k)=>Object.hasOwn(vars, k) ? String(vars[k]) : m) : s;
 }
-const t=(key, vars)=>tr(lang, key, vars);
-// The PDF report stays in English (html lang="en"); its labels use tEn.
-const tEn=(key, vars)=>tr('en', key, vars);
+const sdT=(key, vars)=>sdTr(uiLang, key, vars);
+// The PDF report stays in English (html lang="en"); its labels use sdTEn.
+const sdTEn=(key, vars)=>sdTr('en', key, vars);
 /** Count-dependent copy: key.one for 1, key.other otherwise. */
-const tn=(key, count, vars)=>t(`${key}.${count===1?'one':'other'}`, {count, ...vars});
-const numFmt=(n)=>Number(n).toLocaleString(lang==='it'?'it-IT':'en-US');
+const sdTn=(key, count, vars)=>sdT(`${key}.${count===1?'one':'other'}`, {count, ...vars});
+const uiNum=(n)=>Number(n).toLocaleString(uiLang==='it'?'it-IT':'en-US');
 // Static nodes from page.tsx: data-i18n swaps the text, data-i18n-<attr> an attribute.
 const I18N_ATTRS=['placeholder','aria-label','title'];
 function applyI18nNodes(root=document){
-  root.querySelectorAll('[data-i18n]').forEach(el=>{ el.textContent=t(el.dataset.i18n); });
-  I18N_ATTRS.forEach(a=>root.querySelectorAll(`[data-i18n-${a}]`).forEach(el=>{ el.setAttribute(a, t(el.getAttribute(`data-i18n-${a}`))); }));
+  root.querySelectorAll('[data-i18n]').forEach(el=>{ el.textContent=sdT(el.dataset.i18n); });
+  I18N_ATTRS.forEach(a=>root.querySelectorAll(`[data-i18n-${a}]`).forEach(el=>{ el.setAttribute(a, sdT(el.getAttribute(`data-i18n-${a}`))); }));
 }
 
 const feed = document.getElementById('feed');
@@ -106,8 +109,8 @@ function renderSrcChips(){
     const c = document.createElement('button');
     c.className = 'chip'; c.type = 'button';
     c.style.color = 'var(--amber)'; c.style.borderColor = 'rgba(240,168,60,.4)';
-    c.textContent = t('composer.source.chip', { label: s.label, count: numFmt(s.text.length) });
-    c.title = t('composer.source.remove');
+    c.textContent = sdT('composer.source.chip', { label: s.label, count: uiNum(s.text.length) });
+    c.title = sdT('composer.source.remove');
     c.onclick = () => { sources.splice(i, 1); renderSrcChips(); refreshReady(); };
     el.appendChild(c);
   });
@@ -120,12 +123,12 @@ function addSource(label, text, note, meta){
 }
 
 async function loadLinkSource(url){
-  fileName.textContent = t('composer.status.openingLink');
+  fileName.textContent = sdT('composer.status.openingLink');
   const res = await apiFetch('/api/extract', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ kind: 'link', url }) });
   const j = await res.json();
-  if (!res.ok) throw new Error(j.error || t('composer.error.link'));
-  addSource(j.label, j.text, j.approximate ? t('composer.status.approximate') : '', {kind:'link', url});
+  if (!res.ok) throw new Error(j.error || sdT('composer.error.link'));
+  addSource(j.label, j.text, j.approximate ? sdT('composer.status.approximate') : '', {kind:'link', url});
   return j;
 }
 
@@ -201,11 +204,11 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
   e.target.value = '';
   try {
     if (file.type === 'application/pdf') {
-      fileName.textContent = t('composer.status.reading', { name: file.name });
+      fileName.textContent = sdT('composer.status.reading', { name: file.name });
       const buf = await file.arrayBuffer();
       let pdfjsLib;
       try { pdfjsLib = await loadPdfjs(); }
-      catch { throw new Error(t('composer.error.pdfReader')); }
+      catch { throw new Error(sdT('composer.error.pdfReader')); }
       const doc = await pdfjsLib.getDocument({ data: buf, isEvalSupported: false }).promise;
       let txt = ''; const max = Math.min(doc.numPages, 20);
       for (let i = 1; i <= max; i++) {
@@ -213,11 +216,11 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
         const c = await pg.getTextContent();
         txt += c.items.map((it) => it.str).join(' ') + '\n';
       }
-      if (txt.trim().length < 20) throw new Error(t('composer.error.pdfEmpty'));
+      if (txt.trim().length < 20) throw new Error(sdT('composer.error.pdfEmpty'));
       addSource(file.name, txt.trim(), '', {kind:'file'});
     } else if (file.type.startsWith('image/')) {
-      if (file.size > 5 * 1024 * 1024) throw new Error(t('composer.error.imageSize'));
-      fileName.textContent = t('composer.status.reading', { name: file.name });
+      if (file.size > 5 * 1024 * 1024) throw new Error(sdT('composer.error.imageSize'));
+      fileName.textContent = sdT('composer.status.reading', { name: file.name });
       const b64 = await new Promise((ok, ko) => {
         const r = new FileReader();
         r.onload = () => ok(String(r.result).split(',')[1]);
@@ -226,12 +229,12 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
       const res = await apiFetch('/api/extract', { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind: 'image', media_type: file.type, data: b64 }) });
       const j = await res.json();
-      if (!res.ok) throw new Error(j.error || t('composer.error.image'));
+      if (!res.ok) throw new Error(j.error || sdT('composer.error.image'));
       addSource(file.name + ' (screenshot)', j.text, '', {kind:'file'});
     } else if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
       await transcribeAudio(await file.arrayBuffer(), file.name);
     } else {
-      fileName.textContent = '⚠ ' + t('composer.error.fileType', { type: file.type || file.name.split('.').pop() });
+      fileName.textContent = '⚠ ' + sdT('composer.error.fileType', { type: file.type || file.name.split('.').pop() });
     }
   } catch (err) {
     fileName.textContent = '⚠ ' + err.message;
@@ -262,24 +265,24 @@ function wavBase64(mono){
 }
 
 async function transcribeAudio(arrayBuf, label){
-  fileName.textContent = t('composer.status.preparingAudio');
+  fileName.textContent = sdT('composer.status.preparingAudio');
   const AC = window.AudioContext || window.webkitAudioContext;
   const ac = new AC();
   let decoded;
   try { decoded = await ac.decodeAudioData(arrayBuf); }
-  catch { throw new Error(t('composer.error.audio')); }
+  catch { throw new Error(sdT('composer.error.audio')); }
   finally { ac.close(); }
-  if (decoded.duration > MAX_AUDIO_SEC) throw new Error(t('composer.error.audioLong', { minutes: Math.round(decoded.duration / 60), limit: MAX_AUDIO_SEC / 60 }));
-  if (decoded.duration < 1) throw new Error(t('composer.error.audioShort'));
+  if (decoded.duration > MAX_AUDIO_SEC) throw new Error(sdT('composer.error.audioLong', { minutes: Math.round(decoded.duration / 60), limit: MAX_AUDIO_SEC / 60 }));
+  if (decoded.duration < 1) throw new Error(sdT('composer.error.audioShort'));
   const rate = 16000; // speech-recognition standard; shrinks the upload too
   const oc = new OfflineAudioContext(1, Math.ceil(decoded.duration * rate), rate);
   const src = oc.createBufferSource(); src.buffer = decoded; src.connect(oc.destination); src.start();
   const data = wavBase64(await oc.startRendering());
-  fileName.textContent = t('composer.status.transcribing', { label, seconds: Math.round(decoded.duration) });
+  fileName.textContent = sdT('composer.status.transcribing', { label, seconds: Math.round(decoded.duration) });
   const res = await apiFetch('/api/extract', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ kind: 'audio', media_type: 'audio/wav', data }) });
   const j = await res.json();
-  if (!res.ok) throw new Error(j.error || t('composer.error.transcribe'));
+  if (!res.ok) throw new Error(j.error || sdT('composer.error.transcribe'));
   addSource(`${label} (voice note)`, j.text, '', {kind:'voice'});
 }
 
@@ -290,12 +293,12 @@ const STOP_ICON = '<span class="stop-dot" aria-hidden="true"></span>';
 function paintRecIdle(){
   recBtn.innerHTML = MIC_ICON;
   recBtn.classList.remove('is-recording');
-  recBtn.setAttribute('aria-label', t('composer.record'));
-  recBtn.title = t('composer.record');
+  recBtn.setAttribute('aria-label', sdT('composer.record'));
+  recBtn.title = sdT('composer.record');
 }
-const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const recClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 function paintRecRecording(seconds){
-  const label = t('composer.record.stop', { time: clock(seconds) });
+  const label = sdT('composer.record.stop', { time: recClock(seconds) });
   recBtn.innerHTML = STOP_ICON;
   recBtn.classList.add('is-recording');
   recBtn.setAttribute('aria-label', label);
@@ -313,12 +316,12 @@ recBtn.addEventListener('click', async () => {
     // tell the user to move to a real browser tab instead of "check permission".
     fileName.textContent =
       err.name === 'NotAllowedError'
-        ? t('composer.mic.blocked')
+        ? sdT('composer.mic.blocked')
         : err.name === 'NotFoundError' || err.name === 'OverconstrainedError'
-          ? t('composer.mic.missing')
+          ? sdT('composer.mic.missing')
           : err.name === 'SecurityError'
-            ? t('composer.mic.insecure')
-            : t('composer.mic.unavailable', { reason: err.message || err.name });
+            ? sdT('composer.mic.insecure')
+            : sdT('composer.mic.unavailable', { reason: err.message || err.name });
     return;
   }
   const chunks = [];
@@ -339,7 +342,7 @@ recBtn.addEventListener('click', async () => {
   const tick = () => {
     const s = Math.floor((Date.now() - t0) / 1000);
     paintRecRecording(s);
-    fileName.textContent = t('composer.record.status', { time: clock(s) });
+    fileName.textContent = sdT('composer.record.status', { time: recClock(s) });
     if (s >= MAX_AUDIO_SEC && rec) rec.stop();
   };
   tick(); recTimer = setInterval(tick, 1000);
@@ -518,26 +521,26 @@ function portfolioBlock(p){
   </div>`;
 }
 
-// Labels take the translator so the English PDF report can pass tEn; values
+// Labels take the translator so the English PDF report can pass sdTEn; values
 // with no catalog entry (an unknown kind or region code) show as is.
 const ASSET_CODES=['stock','crypto','etf','bond','private','polymarket'];
 const REGION_CODES=['us','eu','cn','it','other','global'];
-const assetLabel=(xs,tt=t)=>xs?.length?xs.map(x=>ASSET_CODES.includes(x)?tt(`label.asset.${x}`):x).join(' + '):tt('label.asset.none');
-const regionLabel=(xs,tt=t)=>xs?.length?xs.map(x=>REGION_CODES.includes(x)?tt(`label.region.${x}`):x).join(' / '):tt('label.region.none');
-const dirLabel=(d,tt=t)=>tt(d==='short'?'label.dir.short':d==='both'?'label.dir.both':'label.dir.long');
+const assetLabel=(xs,tt=sdT)=>xs?.length?xs.map(x=>ASSET_CODES.includes(x)?tt(`label.asset.${x}`):x).join(' + '):tt('label.asset.none');
+const regionLabel=(xs,tt=sdT)=>xs?.length?xs.map(x=>REGION_CODES.includes(x)?tt(`label.region.${x}`):x).join(' / '):tt('label.region.none');
+const dirLabel=(d,tt=sdT)=>tt(d==='short'?'label.dir.short':d==='both'?'label.dir.both':'label.dir.long');
 // Mirrors the Screen settings selectors (2026-07-13): same categories, same
 // live state — every seg click repaints this bar via repaintParse().
 function parseSummary(th){
   const picks=(key,allVal)=>((typeof cardCrit!=='undefined'&&cardCrit?.[key])||[]).filter(v=>v!==allVal);
   const caps=picks('cap_set',CAP_ALL);
-  const capLabel=caps.length?caps.map(c=>SEG_CAPS.includes(c)?t(`review.cap.${c}`):c).join(' + '):t('label.cap.all');
+  const capLabel=caps.length?caps.map(c=>SEG_CAPS.includes(c)?sdT(`review.cap.${c}`):c).join(' + '):sdT('label.cap.all');
   const showBreadth=(th.strategies||[]).length>=2 && (th.direction||'long')!=='both';
   return `<div class="parse-bar">
-    <div class="parse-item"><div class="k">${esc(t('review.direction'))}</div><div class="v">${esc(dirLabel(th.direction))}</div></div>
-    ${showBreadth?`<div class="parse-item"><div class="k">${esc(t('review.breadth'))}</div><div class="v">${esc(t(breadthMode==='diversified'?'review.breadth.diversified':'review.breadth.focused'))}</div></div>`:''}
-    <div class="parse-item"><div class="k">${esc(t('review.assets'))}</div><div class="v">${esc(assetLabel(picks('asset_set',ASSET_ALL)))}</div></div>
-    <div class="parse-item"><div class="k">${esc(t('review.markets'))}</div><div class="v">${esc(regionLabel(picks('region_set',REGION_GLOBAL)))}</div></div>
-    <div class="parse-item"><div class="k">${esc(t('review.cap'))}</div><div class="v">${esc(capLabel)}</div></div>
+    <div class="parse-item"><div class="k">${esc(sdT('review.direction'))}</div><div class="v">${esc(dirLabel(th.direction))}</div></div>
+    ${showBreadth?`<div class="parse-item"><div class="k">${esc(sdT('review.breadth'))}</div><div class="v">${esc(sdT(breadthMode==='diversified'?'review.breadth.diversified':'review.breadth.focused'))}</div></div>`:''}
+    <div class="parse-item"><div class="k">${esc(sdT('review.assets'))}</div><div class="v">${esc(assetLabel(picks('asset_set',ASSET_ALL)))}</div></div>
+    <div class="parse-item"><div class="k">${esc(sdT('review.markets'))}</div><div class="v">${esc(regionLabel(picks('region_set',REGION_GLOBAL)))}</div></div>
+    <div class="parse-item"><div class="k">${esc(sdT('review.cap'))}</div><div class="v">${esc(capLabel)}</div></div>
   </div>`;
 }
 function splitSentences(s){
@@ -573,25 +576,25 @@ function warningBadges(p, groupSize=1){
   return w.map(([cls,label])=>`<span class="badge ${cls}">${esc(label)}</span>`).join('');
 }
 const SORT_KEYS=['rank','score','cap','move'];
-const sortSelect=()=>`<label>${esc(t('results.sort'))} <select data-act="sort">${SORT_KEYS.map(k=>`<option value="${k}">${esc(t(`results.sort.${k}`))}</option>`).join('')}</select></label>`;
+const sortSelect=()=>`<label>${esc(sdT('results.sort'))} <select data-act="sort">${SORT_KEYS.map(k=>`<option value="${k}">${esc(sdT(`results.sort.${k}`))}</option>`).join('')}</select></label>`;
 function basketMetrics(groups, dir){
   const picks=groups.flat();
   const kinds=[...new Set(picks.map(p=>p.kind))];
   const regions=[...new Set(picks.filter(p=>p.kind!=='crypto').map(p=>p.region))];
   const avg=picks.length?Math.round(picks.reduce((s,p)=>s+(Number(p.score)||0),0)/picks.length):0;
   const risks=[
-    groups.some(g=>g.length>1)?t('results.risk.duplicates'):'',
+    groups.some(g=>g.length>1)?sdT('results.risk.duplicates'):'',
     // Data held back by the display policy is explained by the results note,
     // not flagged as a gap here.
-    picks.some(p=>!p.market_withheld && !p.market?.price)?t('results.risk.prices'):'',
-    picks.some(p=>p.score<60)?t('results.risk.stretch'):'',
-    dir==='short'?t('results.risk.borrow'):'',
-  ].filter(Boolean).join(', ') || t('results.risk.none');
+    picks.some(p=>!p.market_withheld && !p.market?.price)?sdT('results.risk.prices'):'',
+    picks.some(p=>p.score<60)?sdT('results.risk.stretch'):'',
+    dir==='short'?sdT('results.risk.borrow'):'',
+  ].filter(Boolean).join(', ') || sdT('results.risk.none');
   return `<div class="basket-metrics">
-    <div><div class="k">${esc(t('results.metrics.companies'))}</div><div class="v">${groups.length} / ${picks.length}</div></div>
-    <div><div class="k">${esc(t('results.metrics.mix'))}</div><div class="v">${esc(assetLabel(kinds))}</div></div>
-    <div><div class="k">${esc(t('results.metrics.markets'))}</div><div class="v">${esc(regionLabel(regions))}</div></div>
-    <div><div class="k">${esc(t('results.metrics.fit'))}</div><div class="v">${avg}/100 · ${esc(risks)}</div></div>
+    <div><div class="k">${esc(sdT('results.metrics.companies'))}</div><div class="v">${groups.length} / ${picks.length}</div></div>
+    <div><div class="k">${esc(sdT('results.metrics.mix'))}</div><div class="v">${esc(assetLabel(kinds))}</div></div>
+    <div><div class="k">${esc(sdT('results.metrics.markets'))}</div><div class="v">${esc(regionLabel(regions))}</div></div>
+    <div><div class="k">${esc(sdT('results.metrics.fit'))}</div><div class="v">${avg}/100 · ${esc(risks)}</div></div>
   </div>`;
 }
 // Compact summary box (metrics only) — used by the multi-section result layouts.
@@ -613,7 +616,7 @@ function auditSummary(r){
   const lines=(r.statusLines||[]).filter(s=>/criteria check removed|audit removed|compliance audit removed/i.test(s));
   if(!lines.length) return '';
   return `<section class="block empty-state" style="text-align:left;border-style:solid">
-    <h3 style="display:flex;align-items:center;gap:9px">${esc(t('results.audit'))}<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></h3>
+    <h3 style="display:flex;align-items:center;gap:9px">${esc(sdT('results.audit'))}<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></h3>
     <p>${lines.map(esc).join(' ')}</p>
   </section>`;
 }
@@ -626,12 +629,12 @@ function emptyResearchState(r){
   const isEtf=(r.crit?.asset_set||[]).includes('etf');
   const isEu=(r.crit?.region_set||[]).includes('eu');
   return `<section class="block empty-state">
-    <h3>${esc(t('results.empty'))}</h3>
-    <p>${esc(t('results.empty.text'))}</p>
+    <h3>${esc(sdT('results.empty'))}</h3>
+    <p>${esc(sdT('results.empty.text'))}</p>
     <div class="empty-actions">
-      ${isEtf&&isEu?`<button type="button" data-empty-act="us-etf">${esc(t('results.empty.usEtf'))}</button>`:''}
-      <button type="button" data-empty-act="all-assets">${esc(t('results.empty.allAssets'))}</button>
-      <button type="button" data-empty-act="all-markets">${esc(t('results.empty.allMarkets'))}</button>
+      ${isEtf&&isEu?`<button type="button" data-empty-act="us-etf">${esc(sdT('results.empty.usEtf'))}</button>`:''}
+      <button type="button" data-empty-act="all-assets">${esc(sdT('results.empty.allAssets'))}</button>
+      <button type="button" data-empty-act="all-markets">${esc(sdT('results.empty.allMarkets'))}</button>
     </div>
   </section>`;
 }
@@ -922,11 +925,11 @@ const INFO_ICON='<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="tr
 // key is thesis / progress / results: the title and explainer come from the
 // section.<key> and section.<key>.info catalog entries.
 function sectionHead(key, num){
-  const title=t(`section.${key}`), info=t(`section.${key}.info`);
+  const title=sdT(`section.${key}`), info=sdT(`section.${key}.info`);
   const el=document.createElement('section');
   el.className='block sec-head'; el.dataset.sec=key;
   el.innerHTML=`<span class="sec-num">${num}</span><span class="sec-title">${esc(title)}</span>
-    <span class="info-wrap"><button class="info-btn" type="button" aria-expanded="false" aria-label="${esc(t('section.about', {title}))}">${INFO_ICON}</button>
+    <span class="info-wrap"><button class="info-btn" type="button" aria-expanded="false" aria-label="${esc(sdT('section.about', {title}))}">${INFO_ICON}</button>
     <span class="info-pop" role="note">${esc(info)}</span></span><span class="sec-rule" aria-hidden="true"></span>`;
   const wrap=el.querySelector('.info-wrap'), btn=el.querySelector('.info-btn');
   btn.addEventListener('click',(e)=>{ e.stopPropagation(); const open=wrap.classList.toggle('open'); btn.setAttribute('aria-expanded',String(open)); });
@@ -1135,14 +1138,14 @@ function finReqChips(){
   if(!finReq) return [];
   const out=[];
   (finReq.bounds||[]).forEach((b,i)=>out.push({id:`b${i}`, label:finReqLabel(b)}));
-  (finReq.exposures||[]).forEach((e,i)=>out.push({id:`e${i}`, label:t('finreq.exposure', {pct:e.minWeightPct, name:e.name})}));
-  const or=` ${t('finreq.or')} `;
-  if((finReq.currencies||[]).length) out.push({id:'cur', label:t('finreq.currencies', {list:finReq.currencies.join(or)})});
-  if((finReq.domiciles||[]).length) out.push({id:'dom', label:t('finreq.domiciles', {list:finReq.domiciles.join(or)})});
+  (finReq.exposures||[]).forEach((e,i)=>out.push({id:`e${i}`, label:sdT('finreq.exposure', {pct:e.minWeightPct, name:e.name})}));
+  const or=` ${sdT('finreq.or')} `;
+  if((finReq.currencies||[]).length) out.push({id:'cur', label:sdT('finreq.currencies', {list:finReq.currencies.join(or)})});
+  if((finReq.domiciles||[]).length) out.push({id:'dom', label:sdT('finreq.domiciles', {list:finReq.domiciles.join(or)})});
   return out;
 }
 // Metric names live in the catalogs as finreq.name.<key>; an unknown key shows as is.
-const finReqName=(key)=>msg('en', `finreq.name.${key}`)!=null ? t(`finreq.name.${key}`) : String(key);
+const finReqName=(key)=>sdMsg('en', `finreq.name.${key}`)!=null ? sdT(`finreq.name.${key}`) : String(key);
 const FINREQ_UNITS={market_cap_usd:'usd',aum_usd:'usd',ter_pct:'pct',dividend_yield_pct:'pct',revenue_growth_pct:'pct',earnings_growth_pct:'pct',gross_margin_pct:'pct',operating_margin_pct:'pct',net_margin_pct:'pct',fcf_yield_pct:'pct',return_30d_pct:'pct',return_ytd_pct:'pct',return_1y_pct:'pct',track_record_years:'years',avg_volume:'shares',fund_avg_volume:'shares'};
 function finReqValue(v,unit){
   if(unit==='usd'){ const a=Math.abs(v);
@@ -1151,24 +1154,24 @@ function finReqValue(v,unit){
     if(a>=1e6) return '$'+(v/1e6).toFixed(0)+'M';
     return '$'+v; }
   if(unit==='pct') return v+'%';
-  if(unit==='years') return t(v===1?'finreq.year':'finreq.years', {n:v});
+  if(unit==='years') return sdT(v===1?'finreq.year':'finreq.years', {n:v});
   if(unit==='shares') return v>=1e6?(v/1e6).toFixed(1)+'M':String(v);
   return String(v);
 }
 function finReqLabel(b){
   const name=finReqName(b.key), unit=FINREQ_UNITS[b.key]||'ratio';
-  if(b.min!=null&&b.max!=null) return t('finreq.range', {name, min:finReqValue(b.min,unit), max:finReqValue(b.max,unit)});
-  if(b.min!=null) return t('finreq.min', {name, value:finReqValue(b.min,unit)});
-  return t('finreq.max', {name, value:finReqValue(b.max,unit)});
+  if(b.min!=null&&b.max!=null) return sdT('finreq.range', {name, min:finReqValue(b.min,unit), max:finReqValue(b.max,unit)});
+  if(b.min!=null) return sdT('finreq.min', {name, value:finReqValue(b.min,unit)});
+  return sdT('finreq.max', {name, value:finReqValue(b.max,unit)});
 }
 function finReqBlock(){
   const chips=finReqChips();
   const cannot=(finReq?.unverifiable)||[];
   if(!chips.length&&!cannot.length) return '';
   return `<div class="th-section fin-req">
-    <div class="lbl lbl-hint" tabindex="0">${esc(t('finreq'))}<span class="lbl-pop">${esc(t('finreq.hint'))}</span></div>
-    ${chips.length?`<div class="crit-chips" id="finReqChips">${chips.map(c=>`<span class="crit" data-fr="${c.id}">${esc(c.label)}<button type="button" class="crit-x" data-fr="${c.id}" title="${esc(t('finreq.remove'))}" aria-label="${esc(t('finreq.removeItem', {label:c.label}))}">×</button></span>`).join('')}</div>`:''}
-    ${cannot.length?`<div class="fin-req-note">${esc(t('finreq.notApplied', {items:cannot.join('; ')}))}</div>`:''}
+    <div class="lbl lbl-hint" tabindex="0">${esc(sdT('finreq'))}<span class="lbl-pop">${esc(sdT('finreq.hint'))}</span></div>
+    ${chips.length?`<div class="crit-chips" id="finReqChips">${chips.map(c=>`<span class="crit" data-fr="${c.id}">${esc(c.label)}<button type="button" class="crit-x" data-fr="${c.id}" title="${esc(sdT('finreq.remove'))}" aria-label="${esc(sdT('finreq.removeItem', {label:c.label}))}">×</button></span>`).join('')}</div>`:''}
+    ${cannot.length?`<div class="fin-req-note">${esc(sdT('finreq.notApplied', {items:cannot.join('; ')}))}</div>`:''}
   </div>`;
 }
 /** The requirement set as the card now stands, with removed chips stripped. */
@@ -1196,41 +1199,41 @@ function renderThesisReview(opts){
   const myView=view, myThesis=thesis, myDocText=opts?.docText??docText, myRunId=opts?.runId??currentRunId;
   const th=thesis;
   // One seg button per value; the label is review.<group>.<value>.
-  const segBtns=(group, values, attrs='type="button"')=>values.map(v=>`<button ${attrs} data-v="${v}">${esc(t(`review.${group}.${v}`))}</button>`).join('');
+  const segBtns=(group, values, attrs='type="button"')=>values.map(v=>`<button ${attrs} data-v="${v}">${esc(sdT(`review.${group}.${v}`))}</button>`).join('');
   const DIR_BTN='style="font-family:var(--display);font-weight:600;font-size:13px;border:0;border-radius:7px;padding:7px 15px;cursor:pointer;background:transparent;color:var(--bone-dim)"';
   const card=document.createElement('section'); card.className='block thesis';
   card.innerHTML=`
     <div class="th-h"><h3>${esc(th.title)}</h3></div>
     ${parseSummary(th)}
-    <div class="th-sub lbl-hint" tabindex="0" style="padding-top:22px; color:var(--amber)">${esc(t('review.thesis'))}<span class="lbl-pop">${esc(t('review.thesis.hint'))}</span></div>
+    <div class="th-sub lbl-hint" tabindex="0" style="padding-top:22px; color:var(--amber)">${esc(sdT('review.thesis'))}<span class="lbl-pop">${esc(sdT('review.thesis.hint'))}</span></div>
     <div class="core" id="coreWrap"><p id="corePara">${esc(th.summary)}</p></div>
-    <div class="th-section th-themes"><div class="lbl lbl-hint" id="themesLbl" tabindex="0"><span id="themesLblText">${esc(t('review.themes.ranked'))}</span><span class="lbl-pop">${esc(t('review.themes.hint'))}</span></div>
+    <div class="th-section th-themes"><div class="lbl lbl-hint" id="themesLbl" tabindex="0"><span id="themesLblText">${esc(sdT('review.themes.ranked'))}</span><span class="lbl-pop">${esc(sdT('review.themes.hint'))}</span></div>
       <div id="themesWrap"></div></div>
-    ${(th.private_entities||[]).length?`<div class="th-section"><div class="lbl">${esc(t('review.private'))}</div>
+    ${(th.private_entities||[]).length?`<div class="th-section"><div class="lbl">${esc(sdT('review.private'))}</div>
       <div class="crit-chips">${th.private_entities.map(p=>`<span class="crit">${esc(p.name)}${p.note?` · <b>${esc(p.note)}</b>`:''}</span>`).join('')}</div>
-      <div style="font-size:12px; color:var(--bone-dim); margin-top:8px">${esc(t('review.private.note'))}</div></div>`:''}
-    <div class="th-sub lbl-hint" tabindex="0" style="padding-top:22px; color:var(--amber)">${esc(t('review.settings'))}<span class="lbl-pop">${esc(t('review.settings.hint'))}</span></div>
+      <div style="font-size:12px; color:var(--bone-dim); margin-top:8px">${esc(sdT('review.private.note'))}</div></div>`:''}
+    <div class="th-sub lbl-hint" tabindex="0" style="padding-top:22px; color:var(--amber)">${esc(sdT('review.settings'))}<span class="lbl-pop">${esc(sdT('review.settings.hint'))}</span></div>
     <div class="th-section intent-row">
       <div class="setting-row">
-        ${hintLabel(t('review.direction'),t('review.direction.hint'),SETTING_ICONS.direction)}
+        ${hintLabel(sdT('review.direction'),sdT('review.direction.hint'),SETTING_ICONS.direction)}
         <span class="seg" id="dirSeg" style="display:inline-flex;background:var(--ink);border:1px solid var(--rule);border-radius:9px;padding:3px;gap:6px">
           ${segBtns('direction',['long','short','both'],DIR_BTN)}
         </span>
       </div>
       <div class="setting-row" id="breadthWrap" hidden>
-        ${hintLabel(t('review.breadth'),t('review.breadth.hint'),SETTING_ICONS.breadth)}
+        ${hintLabel(sdT('review.breadth'),sdT('review.breadth.hint'),SETTING_ICONS.breadth)}
         <span class="seg" id="breadthSeg">${segBtns('breadth',['focused','diversified'])}</span>
       </div>
       <div class="setting-row">
-        ${hintLabel(t('review.assets'),t('review.assets.hint'),SETTING_ICONS.assets)}
+        ${hintLabel(sdT('review.assets'),sdT('review.assets.hint'),SETTING_ICONS.assets)}
         <span class="seg" id="assetSeg">${segBtns('assets',[ASSET_ALL,...SEG_ASSETS])}</span>
       </div>
       <div class="setting-row">
-        ${hintLabel(t('review.markets'),t('review.markets.hint'),SETTING_ICONS.markets)}
+        ${hintLabel(sdT('review.markets'),sdT('review.markets.hint'),SETTING_ICONS.markets)}
         <span class="seg" id="regionSeg">${segBtns('markets',[REGION_GLOBAL,...SEG_REGIONS])}</span>
       </div>
       <div class="setting-row">
-        ${hintLabel(t('review.cap'),t('review.cap.hint'),SETTING_ICONS.cap)}
+        ${hintLabel(sdT('review.cap'),sdT('review.cap.hint'),SETTING_ICONS.cap)}
         <span class="seg" id="capSeg">${segBtns('cap',[CAP_ALL,...SEG_CAPS])}</span>
       </div>
       ${finReqBlock()}
@@ -1245,8 +1248,8 @@ function renderThesisReview(opts){
     btn.addEventListener('click',()=>{
       const id=btn.getAttribute('data-fr');
       const chip=card.querySelector(`.crit[data-fr="${id}"]`);
-      if(finReqDropped.has(id)){ finReqDropped.delete(id); chip?.classList.remove('crit-off'); btn.textContent='×'; btn.title=t('finreq.remove'); }
-      else { finReqDropped.add(id); chip?.classList.add('crit-off'); btn.textContent='+'; btn.title=t('finreq.restore'); }
+      if(finReqDropped.has(id)){ finReqDropped.delete(id); chip?.classList.remove('crit-off'); btn.textContent='×'; btn.title=sdT('finreq.remove'); }
+      else { finReqDropped.add(id); chip?.classList.add('crit-off'); btn.textContent='+'; btn.title=sdT('finreq.restore'); }
     });
   });
 
@@ -1318,21 +1321,21 @@ function renderThesisReview(opts){
   let dragFrom=null;
   const paintThemes=()=>{
     const th=thesis.themes;
-    themesLbl.textContent=t(themesEditing ? 'review.themes.editing' : 'review.themes.ranked');
-    const none=`<div class="tt-none">${esc(t('review.themes.none'))}</div>`;
+    themesLbl.textContent=sdT(themesEditing ? 'review.themes.editing' : 'review.themes.ranked');
+    const none=`<div class="tt-none">${esc(sdT('review.themes.none'))}</div>`;
     if(!themesEditing){
       const roChip=(x,i)=>`<span class="theme-tag tt-ro">${i<3?`<b class="tt-rank">${i+1}</b>`:''}${esc(x)}</span>`;
-      const editBtn=`<button type="button" class="tt-edit" id="themesEditBtn">${esc(th.length>3?t('review.themes.editMore', {count:th.length-3}):t('review.themes.edit'))}</button>`;
+      const editBtn=`<button type="button" class="tt-edit" id="themesEditBtn">${esc(th.length>3?sdT('review.themes.editMore', {count:th.length-3}):sdT('review.themes.edit'))}</button>`;
       themesWrap.innerHTML = th.length
         ? `<div class="theme-tags">${th.slice(0,3).map((x,i)=>roChip(x,i)).join('')}${editBtn}</div>`
         : none;
       themesWrap.querySelector('#themesEditBtn')?.addEventListener('click',()=>{ themesEditing=true; paintThemes(); });
       return;
     }
-    const chip=(x,i)=>`<span class="theme-tag tt${i>=3?' tt-other':''}" draggable="true" data-i="${i}">${i>0?`<button type="button" class="tt-up" aria-label="${esc(t('review.themes.moveUp', {theme:x}))}">‹</button>`:''}${i<3?`<b class="tt-rank">${i+1}</b>`:''}${esc(x)}<button type="button" class="tt-x" aria-label="${esc(t('review.themes.remove', {theme:x}))}">×</button></span>`;
+    const chip=(x,i)=>`<span class="theme-tag tt${i>=3?' tt-other':''}" draggable="true" data-i="${i}">${i>0?`<button type="button" class="tt-up" aria-label="${esc(sdT('review.themes.moveUp', {theme:x}))}">‹</button>`:''}${i<3?`<b class="tt-rank">${i+1}</b>`:''}${esc(x)}<button type="button" class="tt-x" aria-label="${esc(sdT('review.themes.remove', {theme:x}))}">×</button></span>`;
     themesWrap.innerHTML = th.length
       ? `<div class="theme-tags">${th.slice(0,3).map((x,i)=>chip(x,i)).join('')}</div>`
-        + (th.length>3?`<div class="lbl tt-others">${esc(t('review.themes.others'))}</div><div class="theme-tags">${th.slice(3).map((x,j)=>chip(x,j+3)).join('')}</div>`:'')
+        + (th.length>3?`<div class="lbl tt-others">${esc(sdT('review.themes.others'))}</div><div class="theme-tags">${th.slice(3).map((x,j)=>chip(x,j+3)).join('')}</div>`:'')
       : none;
     themesWrap.querySelectorAll('.tt').forEach(el=>{
       const i=+el.dataset.i;
@@ -1386,22 +1389,22 @@ function renderThesisReview(opts){
   const paintRunning=(again)=>{
     card.querySelector('#thActions')?.remove();
     const act=document.createElement('div'); act.className='th-actions is-running'; act.id='thActions';
-    act.innerHTML=`<button class="btn-primary btn-running" id="continueBtn" type="button" disabled aria-busy="true">${esc(t('review.action.running'))}<span class="ell" aria-hidden="true"><i></i><i></i><i></i></span></button>`
-      +(again?'':`<span class="run-note">${esc(t('review.action.runNote'))}</span>`);
+    act.innerHTML=`<button class="btn-primary btn-running" id="continueBtn" type="button" disabled aria-busy="true">${esc(sdT('review.action.running'))}<span class="ell" aria-hidden="true"><i></i><i></i><i></i></span></button>`
+      +(again?'':`<span class="run-note">${esc(sdT('review.action.runNote'))}</span>`);
     card.appendChild(act);
   };
   const paintActions=(again)=>{
     card.querySelector('#thActions')?.remove();
     const act=document.createElement('div'); act.className='th-actions'; act.id='thActions';
-    act.innerHTML=`<button class="btn-primary" id="continueBtn">${esc(t(again?'review.action.rerun':'review.action.run'))}</button>
-      <button class="btn-ghost" id="editBtn">${esc(t('review.action.edit'))}</button>`;
+    act.innerHTML=`<button class="btn-primary" id="continueBtn">${esc(sdT(again?'review.action.rerun':'review.action.run'))}</button>
+      <button class="btn-ghost" id="editBtn">${esc(sdT('review.action.edit'))}</button>`;
     card.appendChild(act);
     act.querySelector('#continueBtn').addEventListener('click',()=>run(again));
     act.querySelector('#editBtn').addEventListener('click',()=>{
       const wrap=card.querySelector('#coreWrap');
       wrap.innerHTML='<textarea id="coreEdit"></textarea>';
       const te=wrap.querySelector('#coreEdit'); te.value=thesis.summary; te.focus();
-      act.innerHTML=`<button class="btn-primary" id="saveBtn">${esc(t('review.action.saveRun'))}</button><button class="btn-ghost" id="cancelBtn">${esc(t('review.action.cancel'))}</button>`;
+      act.innerHTML=`<button class="btn-primary" id="saveBtn">${esc(sdT('review.action.saveRun'))}</button><button class="btn-ghost" id="cancelBtn">${esc(sdT('review.action.cancel'))}</button>`;
       act.querySelector('#saveBtn').addEventListener('click',()=>{
         thesis.summary=te.value.trim()||thesis.summary;
         wrap.innerHTML=`<p id="corePara">${esc(thesis.summary)}</p>`;
@@ -1719,8 +1722,8 @@ function reportExecSummary(r){
       <p>No asset met every criterion. Widen one or more filters to run a broader screen.</p>`;
   }
   const groups=groupByCompany(picks);
-  const kinds=assetLabel([...new Set(picks.map(p=>p.kind))], tEn);
-  const regions=regionLabel([...new Set(picks.filter(p=>p.kind!=='crypto').map(p=>p.region))], tEn);
+  const kinds=assetLabel([...new Set(picks.map(p=>p.kind))], sdTEn);
+  const regions=regionLabel([...new Set(picks.filter(p=>p.kind!=='crypto').map(p=>p.region))], sdTEn);
   const dir=t.direction||'long';
   const top=picks.slice().sort((a,b)=>(+b.score||0)-(+a.score||0))[0];
   const avg=Math.round(picks.reduce((s,p)=>s+(+p.score||0),0)/picks.length);
@@ -1876,7 +1879,7 @@ function reportHTML(r){
   const metaBits=[
     new Date().toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}),
     (mode==='expert'?'Guided':'Quick')+' screen',
-    dirLabel(dir, tEn)+(r.pmOnly?' · prediction markets':picks.length?` · ${nCompanies} holding${nCompanies>1?'s':''}`:' · no holdings'),
+    dirLabel(dir, sdTEn)+(r.pmOnly?' · prediction markets':picks.length?` · ${nCompanies} holding${nCompanies>1?'s':''}`:' · no holdings'),
   ];
   // The disclaimer opens on a fresh page (r-break) so it is the report's
   // second page; later sections take their number from their position.
@@ -2129,27 +2132,27 @@ function renderStrategySections(r, dir){
   const other=r.picks.filter(p=>!p.strategy);
   if(other.length) sections.push({name:null, picks:other});
   const groupsAll=groupByCompany(r.picks);
-  view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2>${esc(t('results.strategies', {count:names.length}))}</h2>
-    <div class="recap">${esc(t('results.strategies.recap', {companies:groupsAll.length, listings:r.picks.length, count:names.length}))} ${esc(t('results.prices'))}</div></section>`);
+  view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2>${esc(sdT('results.strategies', {count:names.length}))}</h2>
+    <div class="recap">${esc(sdT('results.strategies.recap', {companies:groupsAll.length, listings:r.picks.length, count:names.length}))} ${esc(sdT('results.prices'))}</div></section>`);
   view.insertAdjacentHTML('beforeend', basketSummary(groupsAll, dir));
   sections.forEach(sec=>{
     const g=groupByCompany(sec.picks);
     const best=Math.max(...sec.picks.map(p=>p.score||0));
-    view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px;color:var(--amber)">${esc(sec.name||t('results.strategy.other'))}</h2>
-      <div class="recap">${esc(tn('results.strategy.recap', g.length, {best}))}${dir==='short'?` · ${esc(t('results.strategy.shortSide'))}`:''}</div></section>`);
+    view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px;color:var(--amber)">${esc(sec.name||sdT('results.strategy.other'))}</h2>
+      <div class="recap">${esc(sdTn('results.strategy.recap', g.length, {best}))}${dir==='short'?` · ${esc(sdT('results.strategy.shortSide'))}`:''}</div></section>`);
     appendPickCards(g);
   });
 }
 
 function renderPredictionsSection(r){
   if(r.predictions?.length){
-    view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px">${esc(t('results.pm'))}</h2>
-      <div class="recap">${esc(tn('results.pm.recap', r.predictions.length))}</div></section>`);
+    view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px">${esc(sdT('results.pm'))}</h2>
+      <div class="recap">${esc(sdTn('results.pm.recap', r.predictions.length))}</div></section>`);
     r.predictions.forEach(b=>view.insertAdjacentHTML('beforeend', pmCard(b)));
   } else if(r.pmOnly){
     view.insertAdjacentHTML('beforeend', `<section class="block empty-state">
-      <h3>${esc(t('results.pm.none'))}</h3>
-      <p>${esc(t('results.pm.none.text'))}</p></section>`);
+      <h3>${esc(sdT('results.pm.none'))}</h3>
+      <p>${esc(sdT('results.pm.none.text'))}</p></section>`);
   }
 }
 
@@ -2192,23 +2195,23 @@ function render(r){
     if (dir === 'both') {
       const longs = groupByCompany(r.picks.filter(p=>p.dir!=='short'));
       const shorts = groupByCompany(r.picks.filter(p=>p.dir==='short'));
-      view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2>${esc(t('results.both'))}</h2>
-        <div class="recap">${esc(t('results.both.recap', {longs:longs.length, shorts:shorts.length, listings:r.picks.length}))}${(r?.picks||[]).some(p=>p.market)?` ${esc(t('results.prices'))}`:''}</div></section>`);
+      view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2>${esc(sdT('results.both'))}</h2>
+        <div class="recap">${esc(sdT('results.both.recap', {longs:longs.length, shorts:shorts.length, listings:r.picks.length}))}${(r?.picks||[]).some(p=>p.market)?` ${esc(sdT('results.prices'))}`:''}</div></section>`);
       view.insertAdjacentHTML('beforeend', basketSummary([...longs,...shorts], dir));
       if (longs.length) {
-        view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px;color:var(--up)">${esc(t('results.both.long'))}</h2></section>`);
+        view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px;color:var(--up)">${esc(sdT('results.both.long'))}</h2></section>`);
         appendPickCards(longs);
       }
       if (shorts.length) {
-        view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px;color:var(--down)">${esc(t('results.both.short'))}</h2></section>`);
+        view.insertAdjacentHTML('beforeend', `<section class="block res-head"><h2 style="font-size:18px;color:var(--down)">${esc(sdT('results.both.short'))}</h2></section>`);
         appendPickCards(shorts);
       }
     } else if (r.breadth==='diversified' && r.picks.some(p=>p.strategy)) {
       renderStrategySections(r, dir);
     } else {
       const groups = groupByCompany(r.picks);
-      const heading = tn(dir==='short' ? 'results.shortMatched' : 'results.matched', groups.length);
-      const recap = t(dir==='short' ? 'results.recap.short' : 'results.recap.long', {companies:groups.length, listings:r.picks.length});
+      const heading = sdTn(dir==='short' ? 'results.shortMatched' : 'results.matched', groups.length);
+      const recap = sdT(dir==='short' ? 'results.recap.short' : 'results.recap.long', {companies:groups.length, listings:r.picks.length});
       view.insertAdjacentHTML('beforeend', resultsCard(groups, dir, heading, recap));
       appendPickCards(groups, {sortInBasket:true});
     }
@@ -2217,18 +2220,18 @@ function render(r){
   // Report export (spec §6, 2026-07-09): every completed run — including empty
   // and Polymarket-only ones — can be saved as a PDF recap.
   const rr=document.createElement('section'); rr.className='block report-row';
-  rr.innerHTML=`<div><div class="rr-t">${esc(t('results.report'))}</div><div class="rr-sub">${esc(t('results.report.text'))}</div></div>
-    <button class="btn-ghost" type="button">${esc(t('results.report.download'))}</button>`;
+  rr.innerHTML=`<div><div class="rr-t">${esc(sdT('results.report'))}</div><div class="rr-sub">${esc(sdT('results.report.text'))}</div></div>
+    <button class="btn-ghost" type="button">${esc(sdT('results.report.download'))}</button>`;
   rr.querySelector('button').addEventListener('click',()=>downloadReport(r));
   view.appendChild(rr);
   const editRow=document.createElement('section'); editRow.className='block report-row';
-  editRow.innerHTML=`<div><div class="rr-t">${esc(t('results.edit'))}</div><div class="rr-sub">${esc(t('results.edit.text'))}</div></div>
-    <div class="report-actions"><button class="btn-ghost" type="button" data-act="edit">${esc(t('results.edit.button'))}</button></div>`;
+  editRow.innerHTML=`<div><div class="rr-t">${esc(sdT('results.edit'))}</div><div class="rr-sub">${esc(sdT('results.edit.text'))}</div></div>
+    <div class="report-actions"><button class="btn-ghost" type="button" data-act="edit">${esc(sdT('results.edit.button'))}</button></div>`;
   editRow.querySelector('[data-act="edit"]').addEventListener('click',()=>{
-    editRow.innerHTML=`<div><div class="rr-t">${esc(t('results.edit.ask'))}</div><div class="rr-sub">${esc(t('results.edit.ask.text'))}</div></div>
+    editRow.innerHTML=`<div><div class="rr-t">${esc(sdT('results.edit.ask'))}</div><div class="rr-sub">${esc(sdT('results.edit.ask.text'))}</div></div>
       <div class="report-actions">
-        <button class="btn-primary" type="button" data-act="yes">${esc(t('results.edit.yes'))}</button>
-        <button class="btn-ghost" type="button" data-act="no">${esc(t('results.edit.no'))}</button>
+        <button class="btn-primary" type="button" data-act="yes">${esc(sdT('results.edit.yes'))}</button>
+        <button class="btn-ghost" type="button" data-act="no">${esc(sdT('results.edit.no'))}</button>
       </div>`;
     editRow.querySelector('[data-act="yes"]').addEventListener('click',()=>{
       downloadReport(r);
@@ -2238,12 +2241,12 @@ function render(r){
   });
   view.appendChild(editRow);
   const shortNote = (r.thesis?.direction === 'short' || r.thesis?.direction === 'both')
-    ? ` ${esc(t('results.footer.short'))}`
+    ? ` ${esc(sdT('results.footer.short'))}`
     : '';
-  const priceNote = (r?.picks||[]).some(p=>p.market) ? ` ${esc(t('results.footer.prices'))}` : '';
+  const priceNote = (r?.picks||[]).some(p=>p.market) ? ` ${esc(sdT('results.footer.prices'))}` : '';
   // The CoinGecko credit is the vendor's required attribution: kept verbatim in every language.
   const cgNote = showsCoinGecko(r) ? ` Crypto data provided by <a href="${CG_URL}" target="_blank" rel="noopener">CoinGecko</a>.` : '';
-  view.insertAdjacentHTML('beforeend', `<footer class="block">${esc(t('results.footer'))}${shortNote}${priceNote}${cgNote} ${esc(t('results.footer.advice'))}</footer>`);
+  view.insertAdjacentHTML('beforeend', `<footer class="block">${esc(sdT('results.footer'))}${shortNote}${priceNote}${cgNote} ${esc(sdT('results.footer.advice'))}</footer>`);
 }
 
 startBtn.addEventListener('click', async ()=>{
@@ -2295,15 +2298,15 @@ document.getElementById('themeLight')?.addEventListener('click', ()=>applyTheme(
 // once; cards already rendered keep their language until they are drawn
 // again, and server status lines stay in English.
 function applyLang(l){
-  lang=safeLang(l);
-  try{ localStorage.setItem(LANG_KEY, lang) }catch{}
-  document.documentElement.lang=lang;
+  uiLang=safeLang(l);
+  try{ localStorage.setItem(LANG_KEY, uiLang) }catch{}
+  document.documentElement.lang=uiLang;
   applyI18nNodes();
   if(!rec || rec.state!=='recording') paintRecIdle();
-  document.getElementById('langEn')?.setAttribute('aria-pressed', lang==='en'?'true':'false');
-  document.getElementById('langIt')?.setAttribute('aria-pressed', lang==='it'?'true':'false');
+  document.getElementById('langEn')?.setAttribute('aria-pressed', uiLang==='en'?'true':'false');
+  document.getElementById('langIt')?.setAttribute('aria-pressed', uiLang==='it'?'true':'false');
 }
-applyLang(lang);
+applyLang(uiLang);
 document.getElementById('langEn')?.addEventListener('click', ()=>applyLang('en'));
 document.getElementById('langIt')?.addEventListener('click', ()=>applyLang('it'));
 

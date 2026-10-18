@@ -51,9 +51,9 @@ check('the serialized data block cannot close its <script> tag', !catalogsJson()
   check(`app/page.tsx: all ${pageKeys.length} data-i18n keys exist`, pageKeys.length > 0 && missing.length === 0, missing);
 
   const desk = readFileSync(new URL('../public/signal-desk.js', import.meta.url), 'utf8');
-  const literal = [...desk.matchAll(/\bt\('([\w.]+)'/g)].map((m) => m[1]!);
-  const counted = [...desk.matchAll(/\btn\('([\w.]+)'/g)].flatMap((m) => [`${m[1]}.one`, `${m[1]}.other`]);
-  const ternary = [...desk.matchAll(/\bt\([^()]*?\?\s*'(\w+\.[\w.]+)'\s*:\s*'(\w+\.[\w.]+)'/g)].flatMap((m) => [m[1]!, m[2]!]);
+  const literal = [...desk.matchAll(/\bsdT\('([\w.]+)'/g)].map((m) => m[1]!);
+  const counted = [...desk.matchAll(/\bsdTn\('([\w.]+)'/g)].flatMap((m) => [`${m[1]}.one`, `${m[1]}.other`]);
+  const ternary = [...desk.matchAll(/\bsdT\([^()]*?\?\s*'(\w+\.[\w.]+)'\s*:\s*'(\w+\.[\w.]+)'/g)].flatMap((m) => [m[1]!, m[2]!]);
   // Keys built from a value: each family must cover every value the code passes.
   const families = [
     ...['thesis', 'progress', 'results'].flatMap((s) => [`section.${s}`, `section.${s}.info`]),
@@ -65,7 +65,7 @@ check('the serialized data block cannot close its <script> tag', !catalogsJson()
     ...['stock', 'crypto', 'etf', 'bond', 'private', 'polymarket'].map((v) => `label.asset.${v}`),
     ...['us', 'eu', 'cn', 'it', 'other', 'global'].map((v) => `label.region.${v}`),
     ...['rank', 'score', 'cap', 'move'].map((v) => `results.sort.${v}`),
-    // Passed as tt(...) so the PDF report can use English, or via a tn() ternary.
+    // Passed as tt(...) so the PDF report can use English, or via an sdTn() ternary.
     ...['long', 'short', 'both'].map((v) => `label.dir.${v}`),
     'label.asset.none',
     'label.region.none',
@@ -79,19 +79,24 @@ check('the serialized data block cannot close its <script> tag', !catalogsJson()
 // ---- the client lookup, run as the browser runs it -----------------------------------
 // The i18n block at the top of signal-desk.js is evaluated in a sandbox with a
 // stub document (holding the same JSON data block layout.tsx renders) and a
-// stub localStorage returning the given saved language.
+// stub localStorage returning the given saved language. Like the real page,
+// the global scope already holds short names from Next's scripts (a global t
+// is what broke the first version of this block), so the block must not
+// redeclare them.
 type Client = { lang: string; t: (k: string, v?: object) => string; tr: (l: string, k: string, v?: object) => string; tn: (k: string, n: number, v?: object) => string };
 function client(saved: string | null, json = catalogsJson()): Client {
   const desk = readFileSync(new URL('../public/signal-desk.js', import.meta.url), 'utf8');
   const start = desk.indexOf('// ---- UI language');
   const end = desk.indexOf('\nconst feed =');
   const block = desk.slice(start, end);
-  const sandbox = {
+  const ctx = vm.createContext({
     document: { getElementById: (id: string) => (id === 'sd-i18n' ? { textContent: json } : null), querySelectorAll: () => [] },
     localStorage: { getItem: () => saved },
-  };
-  return vm.runInNewContext(`${block}\n;({ lang, t, tr, tn })`, sandbox) as Client;
+  });
+  vm.runInContext('var t = {}, e, n, r, o, i;', ctx);
+  return vm.runInContext(`${block}\n;({ lang: uiLang, t: sdT, tr: sdTr, tn: sdTn })`, ctx) as Client;
 }
+check('the i18n block loads next to the short globals Next declares (no SyntaxError)', (() => { try { client(null); return true; } catch { return false; } })());
 {
   check('saved "it" selects Italian', client('it').lang === 'it');
   check('nothing saved means English', client(null).lang === 'en');

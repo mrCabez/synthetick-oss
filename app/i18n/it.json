@@ -111,7 +111,7 @@
   "review.markets.eu": "UE",
   "review.markets.cn": "Cina",
   "review.markets.it": "Italia",
-  "review.cap": "Capitalizzazione",
+  "review.cap": "Dimensione",
   "review.cap.hint": "Fascia di dimensione dell'azienda. Non si applica a ETF e obbligazioni.",
   "review.cap.all": "Tutte",
   "review.cap.low": "Bassa",
